@@ -1,0 +1,23 @@
+default:
+	@echo "target is required"
+
+-include ./rvx_each.mh
+
+ifdef TEMPLATE_FILE
+ifndef TEMPLATE_CONFIG
+update_makefile:
+	@cp -f ${TEMPLATE_FILE} ./Makefile
+else
+update_makefile:
+	@${PYTHON3_CMD} ${RVX_UTIL_HOME}/configure_template.py -i ${TEMPLATE_FILE} -o ./Makefile -c ${TEMPLATE_CONFIG}
+endif
+else
+update_makefile:
+  
+endif
+
+update_makefiles:
+	@${PYTHON3_CMD} ${RVX_UTIL_HOME}/update_makefile.py -p ${CURDIR}
+
+print-%:
+	@echo $*=$($*)
