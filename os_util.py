@@ -183,7 +183,7 @@ def remove_directory(path: Path):
 
 def copy_directory(src_dir: Path, dst_dir: Path):
     assert src_dir.is_dir()
-    shutil.copytree(str(src_dir), str(dst_dir), dirs_exist_ok=True)
+    shutil.copytree(str(src_dir), str(dst_dir), symlinks=False, dirs_exist_ok=True)
 
 
 # overwrite
@@ -210,8 +210,12 @@ def move_files(src_path: Path, dst_path: Path):
 
 
 def move_directory(src_dir: Path, dst_dir: Path):
-    copy_directory(src_dir, dst_dir)
-    remove_directory(src_dir)
+    assert src_dir.is_dir()
+    if not os.path.lexists(dst_dir):
+        shutil.move(str(src_dir), str(dst_dir))
+    else:
+        shutil.copytree(str(src_dir), str(dst_dir), symlinks=True, dirs_exist_ok=True)
+        remove_directory(src_dir)
 
 
 def is_equal_file(a_file: Path, b_file: Path):
