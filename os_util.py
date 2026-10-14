@@ -30,8 +30,9 @@ from pathlib import Path
 
 is_linux = (platform.system() == 'Linux')
 is_windows = not is_linux
-is_centos = 'CentOS' in distro.name() or 'Red Hat' in distro.name()
-is_ubuntu = 'Ubuntu' in distro.name() or 'Debian' in distro.name()
+distro_family_set = {distro.id(), *distro.like().split()}
+is_centos = bool(distro_family_set & {'centos', 'rhel', 'fedora'})
+is_ubuntu = bool(distro_family_set & {'ubuntu', 'debian'})
 is_other_os = (not is_windows) and (not is_centos) and (not is_ubuntu)
 encoding = 'utf8' if is_linux else 'cp949'
 
@@ -98,7 +99,9 @@ def get_os_version(os_name: str):
 
 
 def get_gnome_version():
-    return get_version(run_shell_cmd('gnome-terminal --version').stdout, ' ', 'Terminal', 1) if is_linux else None
+    if not is_linux or not shutil.which('gnome-terminal'):
+        return None
+    return get_version(run_shell_cmd('gnome-terminal --version').stdout, ' ', 'Terminal', 1)
 
 
 # os_version = get_os_version('centos' if is_centos else ) if is_linux else None
@@ -120,6 +123,7 @@ def run_shell_cmd_with_terminal(cmd: str, cwd: Path, waits_when_error: bool = Tr
         if waits_when_error:
             cmd = f'{cmd} || read -p "Press Enter to close" _'
         cmd = 'bash -c ' + make_nested_string(cmd, '"')
+        assert gnome_terminal_version, 'gnome-terminal is NOT found'
         if gnome_terminal_version.split('.')[0] == '2':
             cmd = 'gnome-terminal -e ' + make_nested_string(cmd, '"')
         else:
