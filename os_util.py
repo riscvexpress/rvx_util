@@ -119,16 +119,26 @@ def make_nested_string(text: str, quote: str):
     return text
 
 
+def escape_in_double_quotes(text: str):
+    return text.replace('\\', '\\\\').replace('\"', '\\\"').replace('$', '\\$')
+
+
 def run_shell_cmd_with_terminal(cmd: str, cwd: Path, waits_when_error: bool = True):
     if is_linux:
+        # 137: killed by SIGKILL (pkill -9), which closes the terminal without waiting
+        wait_suffix = '; rc=$?; if [ $rc -ne 0 ] && [ $rc -ne 137 ]; then read -p "Press Enter to close" _; fi'
+        wait_placeholder = '__RVX_WAIT_WHEN_ERROR__'
         if waits_when_error:
-            cmd = f'{cmd} || read -p "Press Enter to close" _'
+            cmd = f'{cmd}{wait_placeholder}'
         cmd = 'bash -c ' + make_nested_string(cmd, '"')
+        wait_suffix = escape_in_double_quotes(wait_suffix)
         assert gnome_terminal_version, 'gnome-terminal is NOT found'
         if gnome_terminal_version.split('.')[0] == '2':
             cmd = 'gnome-terminal -e ' + make_nested_string(cmd, '"')
+            wait_suffix = escape_in_double_quotes(wait_suffix)
         else:
             cmd = f'gnome-terminal -- {cmd}'
+        cmd = cmd.replace(wait_placeholder, wait_suffix)
     else:
         cmd = f'start "" cmd /c "{cmd} || pause"' if waits_when_error else f'start "" cmd /c "{cmd}"'
 
