@@ -18,6 +18,10 @@
 
 import platform
 import os
+import codecs
+import glob
+import locale
+import shlex
 import sys
 import time
 import subprocess
@@ -30,12 +34,29 @@ from filecmp import cmp
 from pathlib import Path
 
 is_linux = (platform.system() == 'Linux')
-is_windows = not is_linux
+is_windows = (platform.system() == 'Windows')
+is_macos = (platform.system() == 'Darwin')
 distro_family_set = {distro.id(), *distro.like().split()}
 is_centos = bool(distro_family_set & {'centos', 'rhel', 'fedora'})
 is_ubuntu = bool(distro_family_set & {'ubuntu', 'debian'})
 is_other_os = (not is_windows) and (not is_centos) and (not is_ubuntu)
-encoding = 'utf8' if is_linux else 'cp949'
+
+
+# console encoding for shell command output (e.g. cp949 on korean windows)
+# cmd.exe writes in the console code page, which differs from python's preferred encoding in utf-8 mode (PYTHONUTF8=1, python 3.15+)
+def _get_shell_encoding():
+    if not is_windows:
+        return 'utf8'
+    import ctypes
+    kernel32 = ctypes.windll.kernel32
+    code_page = kernel32.GetConsoleOutputCP() or kernel32.GetOEMCP()
+    try:
+        return codecs.lookup(f'cp{code_page}').name
+    except LookupError:
+        return locale.getpreferredencoding(False)
+
+
+encoding = _get_shell_encoding()
 
 
 def _get_console_mode():
@@ -75,7 +96,7 @@ def _run_keeping_console_mode(*args, **kwargs):
 
 def run_shell_cmd(cmd: str, cwd: Path = None, stdout=subprocess.PIPE, stderr=subprocess.PIPE, prints_when_error=True, asserts_when_error=True):
     result = _run_keeping_console_mode(cmd, cwd=cwd, shell=True,
-                                       stdout=stdout, stderr=stderr, encoding=encoding)
+                                       stdout=stdout, stderr=stderr, encoding=encoding, errors='replace')
     if result.returncode != 0:
         if asserts_when_error:
             assert 0, result
@@ -108,7 +129,7 @@ def get_gnome_version():
 # os_version = get_os_version('centos' if is_centos else ) if is_linux else None
 gnome_terminal_version = get_gnome_version()
 
-python_cmd = 'python3' if is_linux else 'python'
+python_cmd = 'python' if is_windows else 'python3'
 
 
 def make_nested_string(text: str, quote: str):
@@ -174,13 +195,20 @@ def remove_file(file: Path):
     file.unlink(missing_ok=True)
 
 
-def remove_files(dir: Path, pattern: str):
+# remove the files matching a pattern in dir
+def remove_file_by_pattern(dir: Path, pattern: str):
     if pattern and dir.is_dir():
-        if is_linux:
-            run_shell_cmd('rm -rf {0}'.format(pattern), dir)
-        else:
-            run_shell_cmd('del /s /f /q {0}'.format(pattern), dir)
-
+        for element in glob.glob(os.path.join(glob.escape(str(dir)), pattern)):
+            path = Path(element)
+            if path.is_dir() and not path.is_symlink():
+                continue
+            try:
+                path.unlink()
+            except PermissionError:
+                if not is_windows:
+                    raise
+                os.chmod(path, stat.S_IWRITE)  # read-only file on windows, like 'del /f'
+                path.unlink()
 
 def _is_junction(path: Path):
     return os.name == "nt" and os.path.lexists(path) and bool(os.lstat(path).st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
@@ -207,21 +235,26 @@ def copy_file(src_file: Path, dst_file: Path):
     shutil.copy(str(src_file), str(dst_file))
 
 
+# quote a path for the shell used by run_shell_cmd (cmd.exe on windows, sh otherwise)
+def quote_path(path: Path):
+    return f'"{path}"' if is_windows else shlex.quote(str(path))
+
+
 def move_files(src_path: Path, dst_path: Path):
     if src_path.is_file():
-        if is_linux:
-            run_shell_cmd(f'mv {src_path} {dst_path}')
+        if not is_windows:
+            run_shell_cmd(f'mv {quote_path(src_path)} {quote_path(dst_path)}')
         else:
-            run_shell_cmd(f'move /y {src_path} {dst_path}')
+            run_shell_cmd(f'move /y {quote_path(src_path)} {quote_path(dst_path)}')
     elif src_path.is_dir():
         assert dst_path.is_dir(), dst_path
         for element in src_path.glob('**/*'):
             relative_path = element.relative_to(src_path)
             dst_hier_path = dst_path / relative_path
-            if is_linux:
-                run_shell_cmd(f'mv {element} {dst_hier_path}')
+            if not is_windows:
+                run_shell_cmd(f'mv {quote_path(element)} {quote_path(dst_hier_path)}')
             else:
-                run_shell_cmd(f'move /y {element} {dst_hier_path}')
+                run_shell_cmd(f'move /y {quote_path(element)} {quote_path(dst_hier_path)}')
 
 
 def move_directory(src_dir: Path, dst_dir: Path):
@@ -239,7 +272,7 @@ def is_equal_file(a_file: Path, b_file: Path):
 
 def make_executable(path: Path):
     if path.is_file():
-        if is_linux:
+        if not is_windows:
             run_shell_cmd(f'chmod +x {path.name}', path.parent)
 
 
@@ -363,9 +396,9 @@ if __name__ == '__main__':
         text_to_append = text_to_append.replace('\\n', '\n')
         path = Path(file).resolve()
         assert path.is_file(), path
-        original_text = path.read_text(encoding=encoding)
+        original_text = path.read_text(encoding='utf8')
         extended_text = original_text + text_to_append
-        path.write_text(extended_text, encoding=encoding)
+        path.write_text(extended_text, encoding='utf8')
     elif cmd == 'dir_list':
         check_argument_number(sys.argv, 1)
         dir_list = get_dir_list(Path(sys.argv[2]))
@@ -380,9 +413,9 @@ if __name__ == '__main__':
     elif cmd == 'rm_file':
         check_argument_number(sys.argv, 1)
         remove_file(Path(sys.argv[2]))
-    elif cmd == 'rm_files':
+    elif cmd == 'rm_file_pattern':
         check_argument_number(sys.argv, 2)
-        remove_files(Path(sys.argv[2]), sys.argv[3])
+        remove_file_by_pattern(Path(sys.argv[2]), sys.argv[3])
     elif cmd == 'rm_dir':
         check_argument_number(sys.argv, 1)
         remove_directory(Path(sys.argv[2]))

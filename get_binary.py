@@ -29,19 +29,16 @@ class RvxBinary():
     assert info_dir.is_absolute()
 
     if is_windows:
-      self.info_file = info_dir / f'{target}_windows_info.txt'
-      if not self.info_file.is_file():
-        self.info_file = info_dir / f'{target}_all_info.txt'
+      os_name_list = ['windows']
     elif is_linux:
-      if is_centos:
-        self.info_file = info_dir / f'{target}_centos_info.txt'
-      elif is_ubuntu:
-        self.info_file = info_dir / f'{target}_ubuntu_info.txt'
-      if not self.info_file.is_file():
-        self.info_file = info_dir / f'{target}_linux_info.txt'
-      if not self.info_file.is_file():
-        self.info_file = info_dir / f'{target}_all_info.txt'
-    assert self.info_file.is_file()
+      os_name_list = ['centos'] if is_centos else ['ubuntu'] if is_ubuntu else []
+      os_name_list.append('linux')
+    else:
+      os_name_list = []
+    os_name_list.append('all')
+    info_file_list = [info_dir / f'{target}_{x}_info.txt' for x in os_name_list]
+    self.info_file = next((x for x in info_file_list if x.is_file()), info_file_list[-1])
+    assert self.info_file.is_file(), self.info_file
 
   @staticmethod
   def __get_info(info_file:Path):
